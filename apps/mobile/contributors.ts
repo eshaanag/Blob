@@ -148,11 +148,17 @@ export const CONTRIBUTORS: Contributor[] = [
   {
     name:"Tejinderpal Singh",
     github:'Tejinder105',
-  }
+  },
   {
     name:"Sujal Kshatri",
     github:'suzzzal',
-  }
-  { name:"Yogesh M"
-    github: "yogesh4216"
+  },
+  { 
+    name:"Yogesh M",
+    github: "yogesh4216",
+  },
+  { 
+    name:"Devanshu Chotiya",
+    github: "devanshuwebd",
+  },
 ];
