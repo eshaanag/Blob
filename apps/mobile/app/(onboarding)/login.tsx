@@ -105,14 +105,27 @@ export default function LoginScreen() {
   }, []);
 
   const login = useAuthStore((state) => state.login);
-  const verifyToken = trpc.verifyGoogleToken.useMutation();
+  const verifyToken = trpc.auth.verifyGoogleToken.useMutation();
 
   const handleGoogleSignIn = async () => {
     if (!isGoogleSignInAvailable()) {
       Alert.alert(
         'Dev Build Required',
-        'Google Sign-In is only available in dev builds. For testing in Expo Go, you will be redirected to the home screen.',
-        [{ text: 'OK', onPress: () => router.push('/(tabs)/home') }]
+        'Google Sign-In is only available in dev builds. For testing in Expo Go, you will be logged in as a demo user.',
+        [
+          {
+            text: 'OK',
+            onPress: async () => {
+              await login('demo-token', {
+                id: 'demo-user',
+                name: 'Demo User',
+                email: 'demo@example.com',
+                image: null,
+              });
+              router.replace('/(tabs)/home');
+            },
+          },
+        ]
       );
       return;
     }

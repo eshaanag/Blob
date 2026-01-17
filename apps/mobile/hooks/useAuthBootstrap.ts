@@ -9,7 +9,7 @@ export function useAuthBootstrap() {
   const finishLoading = useAuthStore((state) => state.finishLoading);
   const isLoading = useAuthStore((state) => state.isLoading);
 
-  const { refetch: refetchMe } = trpc.getMe.useQuery(undefined, {
+  const { refetch: refetchMe } = trpc.auth.getMe.useQuery(undefined, {
     enabled: false,
     retry: false,
   });
