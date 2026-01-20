@@ -221,6 +221,9 @@ importers:
       '@trpc/server':
         specifier: ^11.0.0
         version: 11.8.0(typescript@5.9.2)
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@types/react@19.1.17)(bun-types@1.3.5)(expo-sqlite@16.0.10(expo@54.0.30(@babel/core@7.28.5)(@expo/metro-runtime@6.1.2)(expo-router@6.0.21)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(postgres@3.4.7)(react@19.1.0)
       google-auth-library:
         specifier: ^10.5.0
         version: 10.5.0
