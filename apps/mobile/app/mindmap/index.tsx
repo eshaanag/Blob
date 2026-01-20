@@ -3,19 +3,35 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from 'nativewind';
+import { trpc } from '@/utils/trpc';
+import { useState } from 'react';
+import { RefreshControl } from 'react-native';
 
-const PLACEHOLDER_MINDMAPS = [
-  { id: '1', root: 'JavaScript', nodeCount: 12, createdAt: '2024-01-15' },
-  { id: '2', root: 'Functions', nodeCount: 8, createdAt: '2024-01-16' },
-];
 
 export default function MindMapsListScreen() {
   const { topicId } = useLocalSearchParams<{ topicId: string }>();
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
 
-  const isLoading = false;
-  const mindMaps = PLACEHOLDER_MINDMAPS;
+  const [refreshing, setRefreshing] = useState(false);
+
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+  } = trpc.mindMaps.getByTopic.useQuery(
+    { topicId },
+    { enabled: !!topicId }
+  );
+
+  const mindMaps = data?.mindMaps ?? [];
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };  
 
   const handleViewMindMap = (mindMapId: string) => {
     router.push(`/mindmap/${mindMapId}`);
@@ -25,10 +41,35 @@ export default function MindMapsListScreen() {
     console.log('Generate mind map with AI for topic:', topicId);
   };
 
+  if (!topicId || typeof topicId !== 'string') {
+    return (
+      <SafeAreaView className="flex-1 items-center justify-center bg-white dark:bg-black">
+        <Text className="text-gray-500 dark:text-gray-400">
+          Invalid topic
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
   if (isLoading) {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-white dark:bg-black">
         <ActivityIndicator size="large" color={isDark ? '#60A5FA' : '#2563EB'} />
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView className="flex-1 items-center justify-center bg-white dark:bg-black">
+        <Text className="mb-2 text-gray-700 dark:text-gray-300">
+          Failed to load mind maps
+        </Text>
+        <Pressable
+          onPress={() => refetch()}
+          className="rounded-lg bg-blue-600 px-4 py-2">
+          <Text className="font-semibold text-white">Retry</Text>
+        </Pressable>
       </SafeAreaView>
     );
   }
@@ -64,6 +105,13 @@ export default function MindMapsListScreen() {
           <FlatList
             data={mindMaps}
             keyExtractor={(item) => item.id}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={isDark ? '#60A5FA' : '#2563EB'}
+              />
+            }
             renderItem={({ item }) => (
               <Pressable
                 onPress={() => handleViewMindMap(item.id)}
@@ -74,10 +122,10 @@ export default function MindMapsListScreen() {
                   </View>
                   <View className="flex-1">
                     <Text className="text-lg font-semibold text-gray-900 dark:text-white">
-                      {item.root}
+                      Mind Map
                     </Text>
                     <Text className="text-sm text-gray-500 dark:text-gray-400">
-                      {item.nodeCount} nodes
+                      Tap to view
                     </Text>
                   </View>
                   <Ionicons

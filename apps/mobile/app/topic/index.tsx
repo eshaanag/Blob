@@ -1,27 +1,32 @@
-import { View, Text, Pressable, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from 'nativewind';
 
-// TODO: Import and use tRPC hooks
-// import { trpc } from '@/utils/trpc';
-
-// Placeholder data - replace with actual tRPC query
-const PLACEHOLDER_TOPICS = [
-  { id: '1', title: 'JavaScript Basics', description: 'Learn the fundamentals of JavaScript' },
-  { id: '2', title: 'React Native', description: 'Build mobile apps with React Native' },
-  { id: '3', title: 'Data Structures', description: 'Arrays, linked lists, trees, and more' },
-];
+import { trpc } from '@/utils/trpc';
+import { useState } from 'react';
 
 export default function TopicsListScreen() {
   const { colorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
 
-  // TODO: Replace with actual tRPC query
-  // const { data, isLoading, error } = trpc.topics.getAll.useQuery();
-  const isLoading = false;
-  const topics = PLACEHOLDER_TOPICS;
+  const {
+    data,
+    isLoading,
+    error,
+    refetch,
+  } = trpc.topics.getAll.useQuery();
+  
+  const topics = data?.topics ?? [];
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };
 
   const handleCreateTopic = () => {
     router.push('/topic/create');
@@ -35,6 +40,21 @@ export default function TopicsListScreen() {
     return (
       <SafeAreaView className="flex-1 items-center justify-center bg-white dark:bg-black">
         <ActivityIndicator size="large" color={isDark ? '#60A5FA' : '#2563EB'} />
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView className="flex-1 items-center justify-center bg-white dark:bg-black">
+        <Text className="mb-2 text-gray-700 dark:text-gray-300">
+          Failed to load topics
+        </Text>
+        <Pressable
+          onPress={() => refetch()}
+          className="rounded-lg bg-blue-600 px-4 py-2">
+          <Text className="font-semibold text-white">Retry</Text>
+        </Pressable>
       </SafeAreaView>
     );
   }
@@ -72,6 +92,13 @@ export default function TopicsListScreen() {
           <FlatList
             data={topics}
             keyExtractor={(item) => item.id}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={isDark ? '#60A5FA' : '#2563EB'}
+              />
+            }
             renderItem={({ item }) => (
               <Pressable
                 onPress={() => handleTopicPress(item.id)}
