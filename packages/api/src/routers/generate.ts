@@ -1,241 +1,110 @@
 import { z } from "zod";
-import { router, secureProcedure } from "../server.js";
+import { router, publicProcedure } from "../server.js";
+import { settings, flashcards, topics } from "@blob/db/schema";
+import { eq } from "drizzle-orm";
+import { generateFlashcards } from "../utils/gemini.js";
 import { TRPCError } from "@trpc/server";
-import {
-  userSettings,
-  topics,
-  flashcards,
-  quizzes,
-  quizQuestions,
-  quizOptions,
-  mindMaps,
-} from "@blob/db/schema";
-import { eq, and } from "drizzle-orm";
-
-// Import AI SDK - NOTE: This requires @blob/ai package to be properly linked
-// import { StudyMaterialSDK } from "@blob/ai";
-
-const expertiseLevelSchema = z.enum(["beginner", "intermediate", "advanced"]);
 
 export const generateRouter = router({
-  // Generate all study materials for a topic
-  studyMaterials: secureProcedure
+  /**
+   * Generate flashcards from topic content using Gemini API
+   */
+  flashcards: publicProcedure
     .input(
       z.object({
-        topicId: z.string().uuid(),
-        expertiseLevel: expertiseLevelSchema.default("intermediate"),
-        additionalContext: z.string().optional(),
-      }),
+        topicId: z.string().uuid("Invalid topic ID"),
+        content: z.string().min(1, "Content cannot be empty"),
+      })
     )
     .mutation(async ({ input, ctx }) => {
-      // Verify user owns the topic
-      const [topic] = await ctx.db
+      const { topicId, content } = input;
+
+      // Verify topic exists and get userId
+      const topic = await ctx.db
         .select()
         .from(topics)
-        .where(and(eq(topics.id, input.topicId), eq(topics.userId, ctx.userId)))
+        .where(eq(topics.id, topicId))
         .limit(1);
 
-      if (!topic) {
+      if (topic.length === 0) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Topic not found or you don't have access to it",
+          message: "Topic not found",
         });
       }
 
-      // Get user's AI settings
-      const [settings] = await ctx.db
+      const userId = topic[0].userId;
+
+      // Fetch user's API key from settings
+      const userSettings = await ctx.db
         .select()
-        .from(userSettings)
-        .where(eq(userSettings.userId, ctx.userId))
+        .from(settings)
+        .where(eq(settings.userId, userId))
         .limit(1);
 
-      if (!settings?.encryptedApiKey) {
+      if (userSettings.length === 0 || !userSettings[0].geminiApiKey) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Please configure your AI API key in settings first",
+          message: "Gemini API key not found. Please configure your API key in settings.",
         });
       }
 
-      // TODO: Decrypt the API key
-      const apiKey = settings.encryptedApiKey;
-      const provider = settings.aiProvider ?? "google";
-      const model =
-        settings.preferredModel ??
-        (provider === "google" ? "gemini-1.5-flash" : "gpt-4o-mini");
+      const apiKey = userSettings[0].geminiApiKey;
 
-      // TODO: Implement actual AI generation
-      // const sdk = new StudyMaterialSDK({
-      //     provider,
-      //     apiKey,
-      //     model,
-      // });
-      //
-      // const result = await sdk.generateStudyMaterial({
-      //     topic: topic.title,
-      //     expertiseLevel: input.expertiseLevel,
-      //     additionalContext: input.additionalContext,
-      // });
-
-      // For now, return a placeholder indicating the feature needs implementation
-      throw new TRPCError({
-        code: "NOT_IMPLEMENTED",
-        message:
-          "AI generation is not yet fully implemented. This is a skeleton endpoint.",
-      });
-    }),
-
-  // Generate only flashcards
-  flashcards: secureProcedure
-    .input(
-      z.object({
-        topicId: z.string().uuid(),
-        count: z.number().min(1).max(50).default(10),
-        expertiseLevel: expertiseLevelSchema.default("intermediate"),
-        additionalContext: z.string().optional(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      // Verify user owns the topic
-      const [topic] = await ctx.db
-        .select()
-        .from(topics)
-        .where(and(eq(topics.id, input.topicId), eq(topics.userId, ctx.userId)))
-        .limit(1);
-
-      if (!topic) {
+      // Generate flashcards using Gemini API
+      let generatedFlashcards;
+      try {
+        generatedFlashcards = await generateFlashcards(apiKey, content);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Failed to generate flashcards";
+        
+        // Check for specific error types
+        if (errorMessage.includes("API key") || errorMessage.includes("permission")) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: errorMessage,
+          });
+        }
+        
+        if (errorMessage.includes("rate limit")) {
+          throw new TRPCError({
+            code: "TOO_MANY_REQUESTS",
+            message: errorMessage,
+          });
+        }
+        
         throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Topic not found or you don't have access to it",
+          code: "INTERNAL_SERVER_ERROR",
+          message: errorMessage,
         });
       }
 
-      // Get user's AI settings
-      const [settings] = await ctx.db
-        .select()
-        .from(userSettings)
-        .where(eq(userSettings.userId, ctx.userId))
-        .limit(1);
+      // Save flashcards to database
+      const flashcardInserts = generatedFlashcards.map((card) => ({
+        topicId,
+        front: card.front,
+        back: card.back,
+        difficulty: card.difficulty || null,
+        source: "gemini",
+      }));
 
-      if (!settings?.encryptedApiKey) {
+      try {
+        const insertedFlashcards = await ctx.db
+          .insert(flashcards)
+          .values(flashcardInserts)
+          .returning();
+
+        return {
+          success: true,
+          flashcards: insertedFlashcards,
+          count: insertedFlashcards.length,
+        };
+      } catch (dbError) {
         throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Please configure your AI API key in settings first",
+          code: "INTERNAL_SERVER_ERROR",
+          message: `Failed to save flashcards to database: ${dbError instanceof Error ? dbError.message : "Unknown error"}`,
         });
       }
-
-      // TODO: Implement actual AI flashcard generation
-      // This should:
-      // 1. Call the AI SDK to generate flashcards
-      // 2. Save them to the database
-      // 3. Return the created flashcards
-
-      throw new TRPCError({
-        code: "NOT_IMPLEMENTED",
-        message:
-          "Flashcard generation is not yet fully implemented. This is a skeleton endpoint.",
-      });
-    }),
-
-  // Generate only quiz
-  quiz: secureProcedure
-    .input(
-      z.object({
-        topicId: z.string().uuid(),
-        questionCount: z.number().min(1).max(30).default(10),
-        expertiseLevel: expertiseLevelSchema.default("intermediate"),
-        additionalContext: z.string().optional(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      // Verify user owns the topic
-      const [topic] = await ctx.db
-        .select()
-        .from(topics)
-        .where(and(eq(topics.id, input.topicId), eq(topics.userId, ctx.userId)))
-        .limit(1);
-
-      if (!topic) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Topic not found or you don't have access to it",
-        });
-      }
-
-      // Get user's AI settings
-      const [settings] = await ctx.db
-        .select()
-        .from(userSettings)
-        .where(eq(userSettings.userId, ctx.userId))
-        .limit(1);
-
-      if (!settings?.encryptedApiKey) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Please configure your AI API key in settings first",
-        });
-      }
-
-      // TODO: Implement actual AI quiz generation
-      // This should:
-      // 1. Call the AI SDK to generate quiz questions
-      // 2. Save quiz, questions, and options to the database
-      // 3. Return the created quiz
-
-      throw new TRPCError({
-        code: "NOT_IMPLEMENTED",
-        message:
-          "Quiz generation is not yet fully implemented. This is a skeleton endpoint.",
-      });
-    }),
-
-  // Generate only mind map
-  mindMap: secureProcedure
-    .input(
-      z.object({
-        topicId: z.string().uuid(),
-        expertiseLevel: expertiseLevelSchema.default("intermediate"),
-        additionalContext: z.string().optional(),
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      // Verify user owns the topic
-      const [topic] = await ctx.db
-        .select()
-        .from(topics)
-        .where(and(eq(topics.id, input.topicId), eq(topics.userId, ctx.userId)))
-        .limit(1);
-
-      if (!topic) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Topic not found or you don't have access to it",
-        });
-      }
-
-      // Get user's AI settings
-      const [settings] = await ctx.db
-        .select()
-        .from(userSettings)
-        .where(eq(userSettings.userId, ctx.userId))
-        .limit(1);
-
-      if (!settings?.encryptedApiKey) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Please configure your AI API key in settings first",
-        });
-      }
-
-      // TODO: Implement actual AI mind map generation
-      // This should:
-      // 1. Call the AI SDK to generate mind map structure
-      // 2. Save it to the database
-      // 3. Return the created mind map
-
-      throw new TRPCError({
-        code: "NOT_IMPLEMENTED",
-        message:
-          "Mind map generation is not yet fully implemented. This is a skeleton endpoint.",
-      });
     }),
 });
